@@ -1,3 +1,6 @@
 .vs/
 iFakeLocation/bin/
 iFakeLocation/obj/
+iFakeLocation/env/
+Built/
+GPS Paths/

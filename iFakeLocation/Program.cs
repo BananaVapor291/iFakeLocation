@@ -7,11 +7,13 @@ using System.Threading;
 using System.Linq;
 using System.Globalization;
 using System.Collections.Generic;
+using System.Collections;
 using System.Net.Http;
 using iMobileDevice;
 using Newtonsoft.Json;
 using ICSharpCode.SharpZipLib.Zip;
 using System.Runtime.InteropServices;
+using Aspose.Gis;
 
 namespace iFakeLocation
 {
@@ -346,6 +348,200 @@ namespace iFakeLocation
             }
         }
 
+        // Method to stop a "walk"
+        [EndpointMethod("stop_walk")]
+        static void StopWalk(HttpListenerContext ctx) {
+            if (ctx.Request.Headers["Content-Type"] == "application/json") {
+                using (var sr = new StreamReader(ctx.Request.InputStream, ctx.Request.ContentEncoding)) {
+                    // Read the JSON body
+                    dynamic data = JsonConvert.DeserializeObject<dynamic>(sr.ReadToEnd());
+                    DeviceInformation device;
+
+                    // Find the matching device udid
+                    lock (Devices)
+                        device = Devices.FirstOrDefault(d => d.UDID == (string) data.udid);
+
+                    // Check if we already have the dependencies
+                    if (device == null) {
+                        SetResponse(ctx,
+                            new {error = "Unable to find the specified device. Are you sure it is connected?"});
+                    }
+                    else {
+                        try {
+                            if (DeveloperImageHelper.HasImageForDevice(device, out string[] p)) {
+                                device.EnableDeveloperMode(p[0], p[1]);
+                                device.StopLocation();
+                                SetResponse(ctx, new { success = true });
+                            }
+                            else {
+                                throw new Exception("The developer images for the specified device are missing.");
+                            }
+                        }
+                        catch (Exception e) {
+                            SetResponse(ctx, new {error = e.Message});
+                        }
+                    }
+                }
+            }
+        }
+
+        // Method to start a "walk"
+        [EndpointMethod("start_walk")]
+        static void StartWalk(HttpListenerContext ctx) {
+            if (ctx.Request.Headers["Content-Type"] == "application/json") {
+                using (var sr = new StreamReader(ctx.Request.InputStream, ctx.Request.ContentEncoding)) {
+                    // Read the JSON body
+                    dynamic data = JsonConvert.DeserializeObject<dynamic>(sr.ReadToEnd());
+                    DeviceInformation device;
+
+                    // Find the matching device udid
+                    lock (Devices)
+                        device = Devices.FirstOrDefault(d => d.UDID == (string) data.udid);
+
+                    // Check if we already have the dependencies
+                    if (device == null) {
+                        SetResponse(ctx,
+                            new {error = "Unable to find the specified device. Are you sure it is connected?"});
+                    }
+                    else {
+                        try {
+                            // Check if developer mode toggle is visible (on >= iOS 16)
+                            if (device.GetDeveloperModeToggleState() ==
+                                DeviceInformation.DeveloperModeToggleState.Hidden) {
+                                device.EnableDeveloperModeToggle();
+                                SetResponse(ctx,
+                                    new {
+                                        error = "Please turn on Developer Mode first via Settings >> Privacy & Security on your device."
+                                    });
+                            }
+                            // Ensure the developer image exists
+                            else if (DeveloperImageHelper.HasImageForDevice(device, out var p)) {
+                                device.EnableDeveloperMode(p[0], p[1]);
+                                // TODO: THIS IS WHERE INTERPOLATION HAS TO HAPPEN
+                                ArrayList points = getGPX();
+                                ArrayList interPoints = new ArrayList();
+                                double totalDistance = 0;
+                                double speed = 1.5; // Human walking speed in m/s
+                                double timeBetweenIntervals = 1;
+
+                                // Get total distance to determine how many intermediate points there will be
+                                for (int i = 0; i < points.Count - 1; i++) {
+                                    PointLatLng first = (PointLatLng) points[i];
+                                    PointLatLng next = (PointLatLng) points[i + 1];
+                                    totalDistance += calculateDistanceBetweenLocations(first, next);
+                                }
+
+                                // Calculate total time to travel
+                                double totalTime = totalDistance / speed;
+
+                                // Calculate number of intervals
+                                double numIntervals = totalTime / timeBetweenIntervals;
+
+                                for (int i = 0; i < points.Count - 1; i++) {
+                                    PointLatLng first = (PointLatLng) points[i];
+                                    PointLatLng next = (PointLatLng) points[i + 1];
+                                    double bearing = calculateBearing(first, next);
+                                    PointLatLng intermediateLocation = calculateDestinationLocation(first, bearing, 4.0);
+                                }
+
+                                device.SetLocation(new PointLatLng {Lat = data.lat, Lng = data.lng});
+                                SetResponse(ctx, new {success = true});
+                            }
+                            else {
+                                throw new Exception("The developer images for the specified device are missing.");
+                            }
+                        }
+                        catch (Exception e) {
+                            SetResponse(ctx, new {error = e.Message});
+                        }
+                    }
+                }
+            }
+        }
+
+        // Helper functions for the gpx interpolation
+        static double degToRad(double deg) {
+            return (deg * Math.PI / 180);
+        }
+
+        static double radToDeg(double rad) {
+            return (rad * 180 / Math.PI);
+        }
+
+        const double EARTH_RADIUS = 6371; // Earth's mean radius in km
+        static double calculateBearing(PointLatLng start, PointLatLng end) {
+            double lat1 = degToRad(start.Lat);
+            double lat2 = degToRad(end.Lat);
+            double deltaLon = degToRad(end.Lng - start.Lng);
+
+            double y = Math.Sin(deltaLon) * Math.Cos(lat2);
+            double x = Math.Cos(lat1) * Math.Sin(lat2) - Math.Sin(lat1) * Math.Cos(lat2) * Math.Cos(deltaLon);
+            double bearing = Math.Atan2(y, x);
+
+            // Since atan2 returns a value between -180 and +180, we need to convert it to 0 - 360 degrees
+            return (radToDeg(bearing) + 360) % 360;
+        }
+
+        // Calculate the destination point from given point having travelled the given distance (in km), on the given initial bearing (bearing may vary before destination is reached)
+        static PointLatLng calculateDestinationLocation(PointLatLng point, double bearing, double distance) {
+            distance = distance / EARTH_RADIUS; // convert to angular distance in radians
+            bearing = degToRad(bearing); // convert bearing to radians
+
+            double lat1 = degToRad(point.Lat);
+            double lon1 = degToRad(point.Lng);
+
+            double lat2 = Math.Asin(Math.Sin(lat1) * Math.Cos(distance) + Math.Cos(lat1) * Math.Sin(distance) * Math.Cos(bearing));
+            double lon2 = lon1 + Math.Atan2(Math.Sin(bearing) * Math.Sin(distance) * Math.Cos(lat1), Math.Cos(distance) - Math.Sin(lat1) * Math.Sin(lat2));
+            lon2 = (lon2 + 3 * Math.PI) % (2 * Math.PI) - Math.PI; // normalize to -180 - + 180 degrees
+
+            return new PointLatLng { Lat = radToDeg(lat2), Lng = radToDeg(lon2) };
+        }
+
+        // Calculate the distance between two points in km
+        static double calculateDistanceBetweenLocations(PointLatLng start, PointLatLng end) {
+            double lat1 = degToRad(start.Lat);
+            double lon1 = degToRad(start.Lng);
+
+            double lat2 = degToRad(end.Lat);
+            double lon2 = degToRad(end.Lng);
+
+            double deltaLat = lat2 - lat1;
+            double deltaLon = lon2 - lon1;
+
+            double a = Math.Sin(deltaLat / 2) * Math.Sin(deltaLat / 2) + Math.Cos(lat1) * Math.Cos(lat2) * Math.Sin(deltaLon / 2) * Math.Sin(deltaLon / 2);
+            double c = 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
+
+            return EARTH_RADIUS * c;
+        }
+
+        static ArrayList getGPX()
+        {
+            var layer = Drivers.Gpx.OpenLayer(@"D:\Code\C#\iFakeLocation\iFakeLocation\GPS Paths\Rough Path.gpx");
+            ArrayList points = new ArrayList();
+
+            foreach (var feature in layer)
+            {
+                // Check for point geometry
+                if (feature.Geometry.GeometryType == Aspose.Gis.Geometries.GeometryType.Point)
+                {
+                    // Read points
+                    Aspose.Gis.Geometries.Point point = (Aspose.Gis.Geometries.Point) feature.Geometry;
+                    points.Add(new PointLatLng { Lat = point.Y, Lng = point.X });
+                }
+            }
+
+            // Print out the contents of points
+            // foreach (PointLatLng point in points) {
+            // Console.WriteLine("Longitude: " + point.Lng + " Latitude: " + point.Lat);
+            // }
+            // for (int i = 0; i < points.Count; i++) {
+            //    PointLatLng point = (PointLatLng) points[i];
+            //     Console.WriteLine(point.Lat);
+            // }
+
+            return points;
+        }
+
         [EndpointMethod("exit")]
         static void Exit(HttpListenerContext ctx) {
             SetResponse(ctx, "");
@@ -471,6 +667,7 @@ namespace iFakeLocation
                 OpenBrowser($"http://localhost:{port}/");
                 Console.WriteLine("iFakeLocation is now running at: " + $"http://localhost:{port}/");
                 Console.WriteLine("\nPress Ctrl-C to quit (or click the close button).");
+                ArrayList points = getGPX();
             }
             catch {
                 Console.WriteLine("Unable to start iFakeLocation using default web browser.");
