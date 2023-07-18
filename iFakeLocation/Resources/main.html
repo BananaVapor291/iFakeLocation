@@ -179,12 +179,18 @@
 						$('#device').empty();
 						for (var i = 0; i < devices.length; i++)
 							$('#device').append($('<option></option>').text(devices[i].display_name).attr('data-udid', devices[i].udid));
-						if (devices.length)
+						if (devices.length) {
 							$('#stop-location').removeAttr('disabled');
-						else
+							$('#stop-path').removeAttr('disabled');
+						}
+						else {
 							$('#stop-location').attr('disabled', true);
-						if (marker)
-							$('#set-location').removeAttr('disabled');
+                            $('#stop-path').attr('disabled', true);
+						}
+						if (marker) {
+                            $('#set-location').removeAttr('disabled');
+                            $('#start-path').removeAttr('disabled');
+						}
 					}
 				});
 			});
@@ -274,6 +280,68 @@
 					}
 				});
 			}
+
+            var lttt = null;
+            function startPath(dev, callback) {
+                fetch('/start_walk', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ udid: dev.udid, lat: marker.getLatLng().lat, lng: marker.getLatLng().lng })
+                }).then(function (e) {
+                    return e.json()
+                }).then(function (r) {
+                    if (r.error) {
+                        showMessageModal(r.error);
+                        callback();
+                    } else {
+                        $('#set-location').popover({
+                            html: true,
+                            content: 'Walk has been started. Confirm using Maps or other apps.',
+                            trigger: 'manual',
+                            placement: 'bottom'
+                        });
+                        if (lttt) clearTimeout(lttt);
+                        $('#set-location').popover('show');
+                        lttt = setTimeout(function () {
+                            $('#set-location').popover('hide');
+                        }, 7000);
+                        callback();
+                    }
+                });
+			}
+
+            var ltttt = null;
+            function stopPath(dev, callback) {
+                fetch('/stop_walk', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ udid: dev.udid })
+                }).then(function (e) {
+                    return e.json()
+                }).then(function (r) {
+                    if (r.error) {
+                        showMessageModal(r.error);
+                        callback();
+                    } else {
+                        $('#stop-location').popover({
+                            html: true,
+                            content: 'Walking has been stopped. If your location is still stuck, try turning Location Services off and back on.',
+                            trigger: 'manual',
+                            placement: 'bottom'
+                        });
+                        if (ltttt) clearTimeout(ltttt);
+                        $('#stop-location').popover('show');
+                        ltttt = setTimeout(function () {
+                            $('#stop-location').popover('hide');
+                        }, 7000);
+                        callback();
+                    }
+                });
+            }
 			
 			function locationPerform(b, locationMethod) {
 				var dev = devices[$('#device')[0].selectedIndex];
@@ -315,6 +383,14 @@
 			$('#stop-location').click(function() {
 				locationPerform($(this).attr('disabled', true), stopLocation);
 			});
+
+            $('#start-path').click(function () {
+                locationPerform($(this).attr('disabled', true), startPath);
+			});
+
+            $('#stop-path').click(function () {
+                locationPerform($(this).attr('disabled', true), stopPath);
+            });
 		</script>
 		<script>
 			// Initialise the OSM provider for searching
@@ -328,8 +404,10 @@
 					marker = new L.marker(e.latlng, {draggable: true}).addTo(map);
 				else
 					marker.setLatLng(e.latlng);
-				if (devices && devices.length)
-					$('#set-location').removeAttr('disabled');
+				if (devices && devices.length) {
+                    $('#set-location').removeAttr('disabled');
+                    $('#start-path').removeAttr('disabled');
+				}
 			});
 
 			function searchLocation() {
@@ -344,8 +422,10 @@
 						else
 							marker.setLatLng([r[0].y, r[0].x]);
 						map.setView([r[0].y, r[0].x], 13);
-						if (devices && devices.length)
-							$('#set-location').removeAttr('disabled');
+						if (devices && devices.length) {
+                            $('#set-location').removeAttr('disabled');
+                            $('#start-path').removeAttr('disabled');
+						}
 					}
 				});
 			}

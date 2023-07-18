@@ -13,7 +13,10 @@ using iMobileDevice;
 using Newtonsoft.Json;
 using ICSharpCode.SharpZipLib.Zip;
 using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
 using Aspose.Gis;
+using System.Runtime.CompilerServices;
 
 namespace iFakeLocation
 {
@@ -348,6 +351,7 @@ namespace iFakeLocation
             }
         }
 
+        private static bool isWalking = false;
         // Method to stop a "walk"
         [EndpointMethod("stop_walk")]
         static void StopWalk(HttpListenerContext ctx) {
@@ -370,6 +374,7 @@ namespace iFakeLocation
                         try {
                             if (DeveloperImageHelper.HasImageForDevice(device, out string[] p)) {
                                 device.EnableDeveloperMode(p[0], p[1]);
+                                isWalking = false;
                                 device.StopLocation();
                                 SetResponse(ctx, new { success = true });
                             }
@@ -418,6 +423,7 @@ namespace iFakeLocation
                             else if (DeveloperImageHelper.HasImageForDevice(device, out var p)) {
                                 device.EnableDeveloperMode(p[0], p[1]);
                                 // TODO: THIS IS WHERE INTERPOLATION HAS TO HAPPEN
+                                isWalking = true;
                                 ArrayList points = getGPX();
                                 ArrayList interPoints = new ArrayList();
                                 double totalDistance = 0;
@@ -434,18 +440,29 @@ namespace iFakeLocation
                                 // Calculate total time to travel
                                 double totalTime = totalDistance / speed;
 
-                                // Calculate number of intervals
-                                double numIntervals = totalTime / timeBetweenIntervals;
-
                                 for (int i = 0; i < points.Count - 1; i++) {
+                                    if (!isWalking) {
+                                        break;
+                                    }
                                     PointLatLng first = (PointLatLng) points[i];
                                     PointLatLng next = (PointLatLng) points[i + 1];
                                     double bearing = calculateBearing(first, next);
-                                    PointLatLng intermediateLocation = calculateDestinationLocation(first, bearing, 4.0);
-                                }
+                                    double travelledSegmentDistance = 0;
+                                    double segmentDistance = calculateDistanceBetweenLocations(first, next);
 
-                                device.SetLocation(new PointLatLng {Lat = data.lat, Lng = data.lng});
-                                SetResponse(ctx, new {success = true});
+                                    while ((travelledSegmentDistance < segmentDistance) && isWalking) {
+                                        double distanceTravelled = speed * timeBetweenIntervals;
+                                        PointLatLng nextLocation = calculateDestinationLocation(first, bearing, distanceTravelled);
+                                        travelledSegmentDistance += calculateDistanceBetweenLocations(first, nextLocation);
+
+                                        if (travelledSegmentDistance > segmentDistance) {
+                                            break;
+                                        }
+                                        device.SetLocation(nextLocation);
+                                        SetResponse(ctx, new { success = true });
+                                        first = nextLocation;
+                                    }
+                                }
                             }
                             else {
                                 throw new Exception("The developer images for the specified device are missing.");
@@ -540,6 +557,14 @@ namespace iFakeLocation
             // }
 
             return points;
+        }
+
+        static void testWait() {
+            Console.WriteLine("Started 10 second delay.");
+            ThreadPool.QueueUserWorkItem(delegate {
+                Thread.Sleep(10000);
+                Console.WriteLine("Done!");
+            });
         }
 
         [EndpointMethod("exit")]
@@ -667,7 +692,8 @@ namespace iFakeLocation
                 OpenBrowser($"http://localhost:{port}/");
                 Console.WriteLine("iFakeLocation is now running at: " + $"http://localhost:{port}/");
                 Console.WriteLine("\nPress Ctrl-C to quit (or click the close button).");
-                ArrayList points = getGPX();
+                // ArrayList points = getGPX();
+                // testWait();
             }
             catch {
                 Console.WriteLine("Unable to start iFakeLocation using default web browser.");
