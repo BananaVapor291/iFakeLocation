@@ -374,6 +374,7 @@ namespace iFakeLocation
                             if (DeveloperImageHelper.HasImageForDevice(device, out string[] p)) {
                                 device.EnableDeveloperMode(p[0], p[1]);
                                 isWalking = false;
+                                Console.WriteLine("Stopping a walk.");
                                 device.StopLocation();
                                 SetResponse(ctx, new { success = true });
                             }
@@ -426,7 +427,7 @@ namespace iFakeLocation
                                 // and this part of the code will pause like it's supposed to, but won't freeze the UI.
                                 ThreadPool.QueueUserWorkItem(delegate {
                                     // Stuff happens in here
-                                    Console.WriteLine("Entered thread.");
+                                    // Console.WriteLine("Entered thread.");
                                     isWalking = true;
                                     ArrayList points = getGPX();
                                     ArrayList interPoints = new ArrayList();
@@ -439,11 +440,12 @@ namespace iFakeLocation
                                     for (int i = 0; i < points.Count - 1; i++) {
                                         PointLatLng first = (PointLatLng)points[i];
                                         PointLatLng next = (PointLatLng)points[i + 1];
-                                        totalDistance += calculateDistanceBetweenLocations(first, next);
+                                        totalDistance += calculateDistanceBetweenLocations(first, next) * 1000; // Convert to meters
                                     }
 
                                     // Calculate total time to travel
                                     double totalTime = totalDistance / speed;
+                                    Console.WriteLine("Total time to travel this path: {0} seconds, {1} minutes.", totalTime, totalTime / 60);
 
                                     for (int i = 0; i < points.Count - 1; i++) {
                                         if (!isWalking) {
@@ -455,25 +457,19 @@ namespace iFakeLocation
                                         PointLatLng next = (PointLatLng)points[i + 1];
                                         double bearing = calculateBearing(first, next);
                                         double travelledSegmentDistance = 0;
-                                        double segmentDistance = calculateDistanceBetweenLocations(first, next);
+                                        double segmentDistance = calculateDistanceBetweenLocations(first, next) * 1000; // Convert to meters
 
                                         while ((travelledSegmentDistance < segmentDistance) && isWalking) {
-                                            Console.WriteLine("\nStarted new while loop.");
-                                            // int n = 1;
+                                            // Console.WriteLine("\nStarted new while loop.");
                                             // Console.WriteLine("Travelled segment distance: {0}", travelledSegmentDistance);
                                             double distanceToTravel = speed * timeBetweenIntervals;
-                                            PointLatLng nextLocation = calculateDestinationLocation(first, bearing, distanceToTravel / 1000);
+                                            PointLatLng nextLocation = calculateDestinationLocation(first, bearing, distanceToTravel / 1000); // The function expects the distance argument to be in kilometers
                                             // Console.WriteLine("Distance between points: {0}", calculateDistanceBetweenLocations(first, nextLocation));
-                                            travelledSegmentDistance += calculateDistanceBetweenLocations(first, nextLocation);
+                                            travelledSegmentDistance += calculateDistanceBetweenLocations(first, nextLocation) * 1000; // Convert to meters
                                             // Console.WriteLine("Travelled segment distance: {0}. Segment distance: {1}", travelledSegmentDistance, segmentDistance);
 
                                             if (travelledSegmentDistance > segmentDistance) {
-                                                //Console.WriteLine("Segment distance too big. n = {0}, t = {1}", n + 1, timeBetweenIntervals / 2);
-                                                //timeBetweenIntervals /= 2;
-                                                //n++;
-                                                //travelledSegmentDistance -= calculateDistanceBetweenLocations(first, nextLocation);
-                                                //continue;
-                                                break;
+                                                break; // Move to the next point in the gpx
                                             }
                                             device.SetLocation(nextLocation);
                                             // SetResponse(ctx, new { success = true });
@@ -523,14 +519,14 @@ namespace iFakeLocation
 
         // Calculate the destination point from given point having travelled the given distance (in km), on the given initial bearing (bearing may vary before destination is reached)
         static PointLatLng calculateDestinationLocation(PointLatLng point, double bearing, double distance) {
-            distance = distance / EARTH_RADIUS; // convert to angular distance in radians
+            double angularDistance = distance / EARTH_RADIUS; // convert to angular distance in radians
             bearing = degToRad(bearing); // convert bearing to radians
 
             double lat1 = degToRad(point.Lat);
             double lon1 = degToRad(point.Lng);
 
-            double lat2 = Math.Asin(Math.Sin(lat1) * Math.Cos(distance) + Math.Cos(lat1) * Math.Sin(distance) * Math.Cos(bearing));
-            double lon2 = lon1 + Math.Atan2(Math.Sin(bearing) * Math.Sin(distance) * Math.Cos(lat1), Math.Cos(distance) - Math.Sin(lat1) * Math.Sin(lat2));
+            double lat2 = Math.Asin(Math.Sin(lat1) * Math.Cos(angularDistance) + Math.Cos(lat1) * Math.Sin(angularDistance) * Math.Cos(bearing));
+            double lon2 = lon1 + Math.Atan2(Math.Sin(bearing) * Math.Sin(angularDistance) * Math.Cos(lat1), Math.Cos(angularDistance) - Math.Sin(lat1) * Math.Sin(lat2));
             lon2 = (lon2 + 3 * Math.PI) % (2 * Math.PI) - Math.PI; // normalize to -180 - + 180 degrees
 
             return new PointLatLng { Lat = radToDeg(lat2), Lng = radToDeg(lon2) };
@@ -579,15 +575,6 @@ namespace iFakeLocation
             // }
 
             return points;
-        }
-
-        static void testWait() {
-            Console.WriteLine("Started 10 second delay.");
-            ThreadPool.QueueUserWorkItem(delegate {
-                Thread.Sleep(10000);
-                Console.WriteLine("Done!");
-            });
-            Console.WriteLine("Stuff after the wait. SHOULDN'T APPEAR UNTIL 10 SECONDS HAVE PASSED.");
         }
 
         [EndpointMethod("exit")]
@@ -715,8 +702,6 @@ namespace iFakeLocation
                 OpenBrowser($"http://localhost:{port}/");
                 Console.WriteLine("iFakeLocation is now running at: " + $"http://localhost:{port}/");
                 Console.WriteLine("\nPress Ctrl-C to quit (or click the close button).");
-                // ArrayList points = getGPX();
-                // testWait();
             }
             catch {
                 Console.WriteLine("Unable to start iFakeLocation using default web browser.");
