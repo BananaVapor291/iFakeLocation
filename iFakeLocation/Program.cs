@@ -13,7 +13,6 @@ using iMobileDevice;
 using Newtonsoft.Json;
 using ICSharpCode.SharpZipLib.Zip;
 using System.Runtime.InteropServices;
-using System.Threading;
 using System.Threading.Tasks;
 using Aspose.Gis;
 using System.Runtime.CompilerServices;
@@ -423,46 +422,69 @@ namespace iFakeLocation
                             else if (DeveloperImageHelper.HasImageForDevice(device, out var p)) {
                                 device.EnableDeveloperMode(p[0], p[1]);
                                 // TODO: THIS IS WHERE INTERPOLATION HAS TO HAPPEN
-                                isWalking = true;
-                                ArrayList points = getGPX();
-                                ArrayList interPoints = new ArrayList();
-                                double totalDistance = 0;
-                                double speed = 1.5; // Human walking speed in m/s
-                                double timeBetweenIntervals = 1;
+                                // TODO: I think all of this has to be put in a thread, that way I can use Thread.Sleep()
+                                // and this part of the code will pause like it's supposed to, but won't freeze the UI.
+                                ThreadPool.QueueUserWorkItem(delegate {
+                                    // Stuff happens in here
+                                    Console.WriteLine("Entered thread.");
+                                    isWalking = true;
+                                    ArrayList points = getGPX();
+                                    ArrayList interPoints = new ArrayList();
+                                    double totalDistance = 0;
+                                    double speed = 20.0; // Human walking speed in m/s
+                                    double timeBetweenIntervals = 1;
 
-                                // Get total distance to determine how many intermediate points there will be
-                                for (int i = 0; i < points.Count - 1; i++) {
-                                    PointLatLng first = (PointLatLng) points[i];
-                                    PointLatLng next = (PointLatLng) points[i + 1];
-                                    totalDistance += calculateDistanceBetweenLocations(first, next);
-                                }
-
-                                // Calculate total time to travel
-                                double totalTime = totalDistance / speed;
-
-                                for (int i = 0; i < points.Count - 1; i++) {
-                                    if (!isWalking) {
-                                        break;
+                                    // Get total distance to determine how many intermediate points there will be
+                                    Console.WriteLine("Calculating total distance.");
+                                    for (int i = 0; i < points.Count - 1; i++) {
+                                        PointLatLng first = (PointLatLng)points[i];
+                                        PointLatLng next = (PointLatLng)points[i + 1];
+                                        totalDistance += calculateDistanceBetweenLocations(first, next);
                                     }
-                                    PointLatLng first = (PointLatLng) points[i];
-                                    PointLatLng next = (PointLatLng) points[i + 1];
-                                    double bearing = calculateBearing(first, next);
-                                    double travelledSegmentDistance = 0;
-                                    double segmentDistance = calculateDistanceBetweenLocations(first, next);
 
-                                    while ((travelledSegmentDistance < segmentDistance) && isWalking) {
-                                        double distanceTravelled = speed * timeBetweenIntervals;
-                                        PointLatLng nextLocation = calculateDestinationLocation(first, bearing, distanceTravelled);
-                                        travelledSegmentDistance += calculateDistanceBetweenLocations(first, nextLocation);
+                                    // Calculate total time to travel
+                                    double totalTime = totalDistance / speed;
 
-                                        if (travelledSegmentDistance > segmentDistance) {
-                                            break;
+                                    for (int i = 0; i < points.Count - 1; i++) {
+                                        if (!isWalking) {
+                                            SetResponse(ctx, new { success = true });
+                                            return;
                                         }
-                                        device.SetLocation(nextLocation);
-                                        SetResponse(ctx, new { success = true });
-                                        first = nextLocation;
+                                        Console.WriteLine("\n\n\n\nCalculating a new point. i = {0}", i);
+                                        PointLatLng first = (PointLatLng)points[i];
+                                        PointLatLng next = (PointLatLng)points[i + 1];
+                                        double bearing = calculateBearing(first, next);
+                                        double travelledSegmentDistance = 0;
+                                        double segmentDistance = calculateDistanceBetweenLocations(first, next);
+
+                                        while ((travelledSegmentDistance < segmentDistance) && isWalking) {
+                                            Console.WriteLine("\nStarted new while loop.");
+                                            // int n = 1;
+                                            // Console.WriteLine("Travelled segment distance: {0}", travelledSegmentDistance);
+                                            double distanceToTravel = speed * timeBetweenIntervals;
+                                            PointLatLng nextLocation = calculateDestinationLocation(first, bearing, distanceToTravel / 1000);
+                                            // Console.WriteLine("Distance between points: {0}", calculateDistanceBetweenLocations(first, nextLocation));
+                                            travelledSegmentDistance += calculateDistanceBetweenLocations(first, nextLocation);
+                                            // Console.WriteLine("Travelled segment distance: {0}. Segment distance: {1}", travelledSegmentDistance, segmentDistance);
+
+                                            if (travelledSegmentDistance > segmentDistance) {
+                                                //Console.WriteLine("Segment distance too big. n = {0}, t = {1}", n + 1, timeBetweenIntervals / 2);
+                                                //timeBetweenIntervals /= 2;
+                                                //n++;
+                                                //travelledSegmentDistance -= calculateDistanceBetweenLocations(first, nextLocation);
+                                                //continue;
+                                                break;
+                                            }
+                                            device.SetLocation(nextLocation);
+                                            // SetResponse(ctx, new { success = true });
+                                            first = nextLocation;
+                                            Thread.Sleep((int) (timeBetweenIntervals * 1000));
+                                        }
+                                        device.SetLocation(next);
+                                        Thread.Sleep((int)(timeBetweenIntervals * 1000));
                                     }
-                                }
+                                });
+                                SetResponse(ctx, new { success = true });
                             }
                             else {
                                 throw new Exception("The developer images for the specified device are missing.");
@@ -565,6 +587,7 @@ namespace iFakeLocation
                 Thread.Sleep(10000);
                 Console.WriteLine("Done!");
             });
+            Console.WriteLine("Stuff after the wait. SHOULDN'T APPEAR UNTIL 10 SECONDS HAVE PASSED.");
         }
 
         [EndpointMethod("exit")]
