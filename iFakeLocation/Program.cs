@@ -13,7 +13,6 @@ using iMobileDevice;
 using Newtonsoft.Json;
 using ICSharpCode.SharpZipLib.Zip;
 using System.Runtime.InteropServices;
-using System.Threading.Tasks;
 using Aspose.Gis;
 using System.Runtime.CompilerServices;
 
@@ -350,7 +349,36 @@ namespace iFakeLocation
             }
         }
 
+        [EndpointMethod("set_speed")]
+        static void setSpeed(HttpListenerContext ctx) {
+            if (ctx.Request.Headers["Content-Type"] == "application/json") {
+                using (var sr = new StreamReader(ctx.Request.InputStream, ctx.Request.ContentEncoding)) {
+                    // Read the JSON body
+                    dynamic data = JsonConvert.DeserializeObject<dynamic>(sr.ReadToEnd());
+                    
+                    // Set the speed, get the path, and calculate trip statistics
+                    pathTraversalSpeed = data.traversalSpeed;
+                    gpxFilePath = data.path;
+
+                    ArrayList points = getGPX();
+                    double totalDistance = 0;
+                    for (int i = 0; i < points.Count - 1; i++) {
+                        PointLatLng first = (PointLatLng)points[i];
+                        PointLatLng next = (PointLatLng)points[i + 1];
+                        totalDistance += calculateDistanceBetweenLocations(first, next) * 1000; // Convert to meters
+                    }
+                    double totalTime = totalDistance / pathTraversalSpeed;
+                    String messageToSend = String.Format("The path is {0} kilometers long. With the traversal speed of {1} m/s, traversing the path will take {2} minutes.", totalDistance / 1000, pathTraversalSpeed, totalTime / 60);
+
+                    // Send the data back to the frontend
+                    SetResponse(ctx, new {message = messageToSend});
+                }
+            }
+        }
+
         private static bool isWalking = false;
+        private static double pathTraversalSpeed = 1.5;
+        private static string gpxFilePath = "";
         // Method to stop a "walk"
         [EndpointMethod("stop_walk")]
         static void StopWalk(HttpListenerContext ctx) {
@@ -375,6 +403,7 @@ namespace iFakeLocation
                                 device.EnableDeveloperMode(p[0], p[1]);
                                 isWalking = false;
                                 Console.WriteLine("Stopping a walk.");
+                                Thread.Sleep(1000);
                                 device.StopLocation();
                                 SetResponse(ctx, new { success = true });
                             }
@@ -422,17 +451,14 @@ namespace iFakeLocation
                             // Ensure the developer image exists
                             else if (DeveloperImageHelper.HasImageForDevice(device, out var p)) {
                                 device.EnableDeveloperMode(p[0], p[1]);
-                                // TODO: THIS IS WHERE INTERPOLATION HAS TO HAPPEN
-                                // TODO: I think all of this has to be put in a thread, that way I can use Thread.Sleep()
+                                // I think all of this has to be put in a thread, that way I can use Thread.Sleep()
                                 // and this part of the code will pause like it's supposed to, but won't freeze the UI.
                                 ThreadPool.QueueUserWorkItem(delegate {
-                                    // Stuff happens in here
-                                    // Console.WriteLine("Entered thread.");
                                     isWalking = true;
                                     ArrayList points = getGPX();
                                     ArrayList interPoints = new ArrayList();
                                     double totalDistance = 0;
-                                    double speed = 20.0; // Human walking speed in m/s
+                                    double speed = pathTraversalSpeed;
                                     double timeBetweenIntervals = 1;
 
                                     // Get total distance to determine how many intermediate points there will be
@@ -442,6 +468,7 @@ namespace iFakeLocation
                                         PointLatLng next = (PointLatLng)points[i + 1];
                                         totalDistance += calculateDistanceBetweenLocations(first, next) * 1000; // Convert to meters
                                     }
+                                    Console.WriteLine("Total distance for this path: {0} meters.", totalDistance);
 
                                     // Calculate total time to travel
                                     double totalTime = totalDistance / speed;
@@ -551,7 +578,7 @@ namespace iFakeLocation
 
         static ArrayList getGPX()
         {
-            var layer = Drivers.Gpx.OpenLayer(@"D:\Code\C#\iFakeLocation\iFakeLocation\GPS Paths\Rough Path.gpx");
+            var layer = Drivers.Gpx.OpenLayer(gpxFilePath);
             ArrayList points = new ArrayList();
 
             foreach (var feature in layer)

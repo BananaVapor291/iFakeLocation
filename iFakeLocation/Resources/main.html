@@ -73,6 +73,10 @@
 					<div class="col">
 						<button type="button" class="btn btn-primary w-100" data-toggle="popover" id="stop-location" disabled>Stop Fake Location</button>
 					</div>
+				</div>
+			</div>
+			<div class="mb-3">
+				<div class="row align-items-center">
 					<div class="col">
 						<button type="button" class="btn btn-primary w-100" data-toggle="popover" id="start-path" disabled>Start Path</button>
 					</div>
@@ -81,6 +85,30 @@
 					</div>
 				</div>
 			</div>
+
+			<form id="speedInput">
+				<div class="mb-3">
+					<div class="row align-items-center">
+						<div class="col-md-auto">
+							<label class="mb-0" for="speedQuery">Set Path Traversal Speed (m/s)</label>
+						</div>
+						<div class="col">
+							<input type="text" class="form-control" id="speedQuery">
+						</div>
+						<div class="col-md-auto">
+							<label class="mb-0" for="gpxPathQuery">Enter Absolute Path to GPX file</label>
+						</div>
+						<div class="col">
+							<input type="text" class="form-control" id="gpxPathQuery">
+						</div>
+						<div class="col-md-auto">
+							<button type="button" class="btn btn-primary pl-4 pr-4" id="speedButton">Submit</button>
+						</div>
+					</div>
+					<p id="infoParagraph"></p>
+				</div>
+			</form>
+
 		</div>
 		<div id="messageModal" class="modal" tabindex="-1" role="dialog">
 			<div class="modal-dialog modal-dialog-centered" role="document">
@@ -189,7 +217,6 @@
 						}
 						if (marker) {
                             $('#set-location').removeAttr('disabled');
-                            $('#start-path').removeAttr('disabled');
 						}
 					}
 				});
@@ -296,16 +323,16 @@
                         showMessageModal(r.error);
                         callback();
                     } else {
-                        $('#set-location').popover({
+                        $('#start-path').popover({
                             html: true,
                             content: 'Walk has been started. Confirm using Maps or other apps.',
                             trigger: 'manual',
                             placement: 'bottom'
                         });
                         if (lttt) clearTimeout(lttt);
-                        $('#set-location').popover('show');
+                        $('#start-path').popover('show');
                         lttt = setTimeout(function () {
-                            $('#set-location').popover('hide');
+                            $('#start-path').popover('hide');
                         }, 7000);
                         callback();
                     }
@@ -327,16 +354,16 @@
                         showMessageModal(r.error);
                         callback();
                     } else {
-                        $('#stop-location').popover({
+                        $('#stop-path').popover({
                             html: true,
-                            content: 'Walking has been stopped. If your location is still stuck, try turning Location Services off and back on.',
+                            content: 'Walking has been stopped. If your location is still stuck, try turning Location Services off and back on. Also, you\'ll probably need to hit Stop Fake Location to truly reset your location.',
                             trigger: 'manual',
                             placement: 'bottom'
                         });
                         if (ltttt) clearTimeout(ltttt);
-                        $('#stop-location').popover('show');
+                        $('#stop-path').popover('show');
                         ltttt = setTimeout(function () {
-                            $('#stop-location').popover('hide');
+                            $('#stop-path').popover('hide');
                         }, 7000);
                         callback();
                     }
@@ -406,7 +433,6 @@
 					marker.setLatLng(e.latlng);
 				if (devices && devices.length) {
                     $('#set-location').removeAttr('disabled');
-                    $('#start-path').removeAttr('disabled');
 				}
 			});
 
@@ -424,7 +450,6 @@
 						map.setView([r[0].y, r[0].x], 13);
 						if (devices && devices.length) {
                             $('#set-location').removeAttr('disabled');
-                            $('#start-path').removeAttr('disabled');
 						}
 					}
 				});
@@ -467,6 +492,40 @@
 					else
 						map.setView([0, 0], 2);
 				});
+			});
+
+			// Create function for submitting the user's selected speed
+			async function submitSpeed() {
+				let speed = $('#speedQuery').val();
+				let gpxPath = $('#gpxPathQuery').val();
+				gpxPath = gpxPath.replace(/[\"\']/g, ""); // Regex to remove any quotes
+				speed = parseFloat(speed);
+				if (Number.isNaN(speed)) {
+					alert(`${$('#speedQuery').val()} is not a valid number!`);
+					return;
+				}
+				console.log(`Path: ${gpxPath}`);
+				// Send the speed and path to the backend
+				let result = await fetch("/set_speed", {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json"
+					},
+					body: JSON.stringify({ traversalSpeed: speed, path: gpxPath })
+				});
+				result = await result.json();
+				result = result.message;
+				$('#infoParagraph').text(result);
+				if (devices && devices.length) {
+                    $('#start-path').removeAttr('disabled');
+				}
+			}
+
+			// Bind the speedButton to the function
+			$('#speedButton').click(submitSpeed);
+			$('#speedInput').submit(function(e) {
+				e.preventDefault();
+				submitSpeed();
 			});
 		</script>
 	</body>
