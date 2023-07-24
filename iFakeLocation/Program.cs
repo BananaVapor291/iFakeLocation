@@ -361,6 +361,10 @@ namespace iFakeLocation
                     gpxFilePath = data.path;
 
                     ArrayList points = getGPX();
+                    if (points.Count == 0) {
+                        SetResponse(ctx, new {message = "The file was not found!"});
+                        return;
+                    }
                     double totalDistance = 0;
                     for (int i = 0; i < points.Count - 1; i++) {
                         PointLatLng first = (PointLatLng)points[i];
@@ -578,8 +582,15 @@ namespace iFakeLocation
 
         static ArrayList getGPX()
         {
-            var layer = Drivers.Gpx.OpenLayer(gpxFilePath);
+            try {
+                var layerTest = Drivers.Gpx.OpenLayer(gpxFilePath);
+            } catch (System.IO.FileNotFoundException e) {
+                Console.WriteLine("File not found!");
+                Console.WriteLine(e);
+                return new ArrayList();
+            }
             ArrayList points = new ArrayList();
+            var layer = Drivers.Gpx.OpenLayer(gpxFilePath);
 
             foreach (var feature in layer)
             {
